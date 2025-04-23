@@ -1,0 +1,120 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <list>
+#include <algorithm>
+
+struct CityKey {
+    std::string countryCode;
+    std::string cityName;
+
+    bool operator==(const CityKey& other) const {
+        return countryCode == other.countryCode && cityName == other.cityName;
+    }
+};
+
+struct CityKeyHash {
+    std::size_t operator()(const CityKey& key) const {
+        return std::hash<std::string>()(key.countryCode + "_" + key.cityName);
+    }
+};
+
+class LRUCache {
+private:
+    size_t maxSize;
+    std::list<std::pair<CityKey, double>> cacheList;
+    std::unordered_map<CityKey, std::list<std::pair<CityKey, double>>::iterator, CityKeyHash> cacheMap;
+
+public:
+    LRUCache(size_t size) : maxSize(size) {}
+
+    bool get(const CityKey& key, double& population) {
+        auto it = cacheMap.find(key);
+        if (it != cacheMap.end()) {
+            cacheList.splice(cacheList.begin(), cacheList, it->second);
+            population = it->second->second;
+            return true;
+        }
+        return false;
+    }
+
+    void put(const CityKey& key, double population) {
+        auto it = cacheMap.find(key);
+        if (it != cacheMap.end()) {
+            it->second->second = population;
+            cacheList.splice(cacheList.begin(), cacheList, it->second);
+        } else {
+            if (cacheList.size() == maxSize) {
+                // Remove least recently used
+                auto last = cacheList.back();
+                cacheMap.erase(last.first);
+                cacheList.pop_back();
+            }
+            cacheList.emplace_front(key, population);
+            cacheMap[key] = cacheList.begin();
+        }
+    }
+
+    void printCache() const {
+        std::cout << "\nCache contents:\n";
+        for (const auto& entry : cacheList) {
+            std::cout << entry.first.countryCode << ", " << entry.first.cityName << " => " << entry.second << "\n";
+        }
+    }
+};
+
+double searchPopulationInCSV(const std::string& filename, const CityKey& key) {
+    std::ifstream file(filename);
+    std::string line;
+    std::getline(file, line);
+
+    while (std::getline(file, line)) {
+        std::stringstream ss(line);
+        std::string countryCode, cityName, populationStr;
+
+        std::getline(ss, countryCode, ',');
+        std::getline(ss, cityName, ',');
+        std::getline(ss, populationStr, ',');
+
+        if (countryCode == key.countryCode && cityName == key.cityName) {
+            return std::stod(populationStr);
+        }
+    }
+    return -1;
+}
+
+int main() {
+    const std::string filename = "world_cities.csv";
+    LRUCache cache(10);
+
+    while (true) {
+        std::string countryCode, cityName;
+        std::cout << "\nEnter country code (or 'exit'): ";
+        std::getline(std::cin, countryCode);
+        if (countryCode == "exit") break;
+
+        std::cout << "Enter city name: ";
+        std::getline(std::cin, cityName);
+
+        CityKey key{countryCode, cityName};
+        double population;
+
+        if (cache.get(key, population)) {
+            std::cout << "Cache hit! Population: " << population << "\n";
+        } else {
+            population = searchPopulationInCSV(filename, key);
+            if (population >= 0) {
+                std::cout << "CSV Lookup. Population: " << population << "\n";
+                cache.put(key, population);
+            } else {
+                std::cout << "City not found.\n";
+            }
+        }
+
+        cache.printCache();
+    }
+
+    return 0;
+}
