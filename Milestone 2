@@ -84,3 +84,138 @@ public:
         }
     }
 };
+class LFUCache : public ICache {
+private:
+    struct Entry {
+        string key;
+        double population;
+        int frequency;
+    };
+
+    size_t maxSize;
+    unordered_map<string, list<Entry>::iterator> cacheMap;
+    list<Entry> cacheList;
+
+    void incrementFrequency(list<Entry>::iterator it) {
+        it->frequency++;
+        auto cur = it;
+        auto prev = it;
+        while (prev != cacheList.begin()) {
+            --prev;
+            if (prev->frequency <= cur->frequency) break;
+        }
+        if (prev != cur) {
+            cacheList.splice(next(prev), cacheList, cur);
+        }
+    }
+
+public:
+    LFUCache(size_t size) : maxSize(size) {}
+
+    bool get(const string& cc, const string& cn, double& population) override {
+        string key = cc + "_" + cn;
+        auto it = cacheMap.find(key);
+        if (it != cacheMap.end()) {
+            population = it->second->population;
+            incrementFrequency(it->second);
+            return true;
+        }
+        return false;
+    }
+
+    void put(const string& cc, const string& cn, double population) override {
+        string key = cc + "_" + cn;
+        auto it = cacheMap.find(key);
+        if (it != cacheMap.end()) {
+            it->second->population = population;
+            incrementFrequency(it->second);
+            return;
+        }
+
+        if (cacheMap.size() >= maxSize) {
+            auto evict = cacheList.begin();
+            cacheMap.erase(evict->key);
+            cacheList.pop_front();
+        }
+
+        Entry entry = {key, population, 1};
+        cacheList.push_back(entry);
+        auto newIt = prev(cacheList.end());
+        cacheMap[key] = newIt;
+    }
+
+    void printCache() const override {
+        cout << "LFU Cache:\n";
+        for (const auto& entry : cacheList) {
+            cout << entry.key << " -> " << entry.population << " (freq: " << entry.frequency << ")\n";
+        }
+    }
+};
+
+double searchPopulationInCSV(const string& filename, const string& cc, const string& cn) {
+    ifstream file(filename);
+    string line;
+    getline(file, line); // Skip header
+
+    while (getline(file, line)) {
+        stringstream ss(line);
+        string fileCC, fileCN, populationStr;
+        getline(ss, fileCC, ',');
+        getline(ss, fileCN, ',');
+        getline(ss, populationStr, ',');
+
+        if (fileCC == cc && fileCN == cn) {
+            return stod(populationStr);
+        }
+    }
+    return -1;
+}
+
+int main() {
+    const string filename = "world_cities.csv";
+    ICache* cache = nullptr;
+
+    cout << "Choose cache strategy (1=LFU, 2=FIFO, 3=Random): ";
+    int choice;
+    cin >> choice;
+    cin.ignore();
+
+    if (choice == 1) {
+        cache = new LFUCache(10);
+    } else if (choice == 2) {
+        cache = new FIFOCache(10);
+    } else if (choice == 3) {
+        cache = new RandomCache(10);
+    } else {
+        cerr << "Invalid choice. Exiting.\n";
+        return 1;
+    }
+
+    while (true) {
+        string countryCode, cityName;
+        cout << "\nEnter country code (or 'exit'): ";
+        getline(cin, countryCode);
+        if (countryCode == "exit") break;
+
+        cout << "Enter city name: ";
+        getline(cin, cityName);
+
+        double population;
+        if (cache->get(countryCode, cityName, population)) {
+            cout << "Cache hit! Population: " << population << "\n";
+        } else {
+            population = searchPopulationInCSV(filename, countryCode, cityName);
+            if (population >= 0) {
+                cout << "CSV Lookup. Population: " << population << "\n";
+                cache->put(countryCode, cityName, population);
+            } else {
+                cout << "City not found.\n";
+            }
+        }
+
+        cache->printCache();
+    }
+
+    delete cache;
+    return 0;
+}
