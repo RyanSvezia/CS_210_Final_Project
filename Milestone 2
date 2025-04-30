@@ -43,3 +43,44 @@ public:
         }
     }
 };
+class RandomCache : public ICache {
+    size_t maxSize;
+    unordered_map<string, double> data;
+    vector<string> keys;
+
+public:
+    RandomCache(size_t size) : maxSize(size) {
+        srand(time(nullptr));
+    }
+
+    bool get(const string& cc, const string& cn, double& population) override {
+        string key = cc + "_" + cn;
+        auto it = data.find(key);
+        if (it != data.end()) {
+            population = it->second;
+            return true;
+        }
+        return false;
+    }
+
+    void put(const string& cc, const string& cn, double population) override {
+        string key = cc + "_" + cn;
+        if (data.find(key) == data.end()) {
+            if (data.size() >= maxSize) {
+                int index = rand() % keys.size();
+                string evictKey = keys[index];
+                data.erase(evictKey);
+                keys.erase(keys.begin() + index);
+            }
+            keys.push_back(key);
+        }
+        data[key] = population;
+    }
+
+    void printCache() const override {
+        cout << "Random Cache:\n";
+        for (const auto& pair : data) {
+            cout << pair.first << " -> " << pair.second << "\n";
+        }
+    }
+};
