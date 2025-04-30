@@ -1,0 +1,7 @@
+class ICache {
+    public:
+        virtual bool get(const std::string& countryCode, const std::string& cityName, double& population) = 0;
+        virtual void put(const std::string& countryCode, const std::string& cityName, double population) = 0;
+        virtual void printCache() const = 0;
+        virtual ~ICache() {}
+    };
