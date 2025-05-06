@@ -1,0 +1,300 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <algorithm>
+#include <list>
+#include <queue>
+#include <vector>
+#include <cstdlib>
+#include <ctime>
+#include <memory>
+using namespace std;
+
+class ICache {
+public:
+    virtual bool get(const string& countryCode, const string& cityName, double& population) = 0;
+    virtual void put(const string& countryCode, const string& cityName, double population) = 0;
+    virtual void printCache() const = 0;
+    virtual ~ICache() {}
+};
+
+class FIFOCache : public ICache {
+    size_t maxSize;
+    queue<pair<string, string>> order;
+    unordered_map<string, double> data;
+
+public:
+    FIFOCache(size_t size) : maxSize(size) {}
+
+    bool get(const string& cc, const string& cn, double& population) override {
+        string key = cc + "_" + cn;
+        auto it = data.find(key);
+        if (it != data.end()) {
+            population = it->second;
+            return true;
+        }
+        return false;
+    }
+
+    void put(const string& cc, const string& cn, double population) override {
+        string key = cc + "_" + cn;
+        if (data.find(key) == data.end()) {
+            if (data.size() >= maxSize) {
+                auto oldest = order.front();
+                order.pop();
+                data.erase(oldest.first + "_" + oldest.second);
+            }
+            order.push({cc, cn});
+        }
+        data[key] = population;
+    }
+
+    void printCache() const override {
+        cout << "FIFO Cache:\n";
+        for (const auto& pair : data) {
+            cout << pair.first << " -> " << pair.second << "\n";
+        }
+    }
+};
+
+class RandomCache : public ICache {
+    size_t maxSize;
+    unordered_map<string, double> data;
+    vector<string> keys;
+
+public:
+    RandomCache(size_t size) : maxSize(size) {
+        srand(time(nullptr));
+    }
+
+    bool get(const string& cc, const string& cn, double& population) override {
+        string key = cc + "_" + cn;
+        auto it = data.find(key);
+        if (it != data.end()) {
+            population = it->second;
+            return true;
+        }
+        return false;
+    }
+
+    void put(const string& cc, const string& cn, double population) override {
+        string key = cc + "_" + cn;
+        if (data.find(key) == data.end()) {
+            if (data.size() >= maxSize) {
+                int index = rand() % keys.size();
+                string evictKey = keys[index];
+                data.erase(evictKey);
+                keys.erase(keys.begin() + index);
+            }
+            keys.push_back(key);
+        }
+        data[key] = population;
+    }
+
+    void printCache() const override {
+        cout << "Random Cache:\n";
+        for (const auto& pair : data) {
+            cout << pair.first << " -> " << pair.second << "\n";
+        }
+    }
+};
+
+class LFUCache : public ICache {
+private:
+    struct Entry {
+        string key;
+        double population;
+        int frequency;
+    };
+
+    size_t maxSize;
+    unordered_map<string, list<Entry>::iterator> cacheMap;
+    list<Entry> cacheList;
+
+    void incrementFrequency(list<Entry>::iterator it) {
+        it->frequency++;
+        auto cur = it;
+        auto prev = it;
+        while (prev != cacheList.begin()) {
+            --prev;
+            if (prev->frequency <= cur->frequency) break;
+        }
+        if (prev != cur) {
+            cacheList.splice(next(prev), cacheList, cur);
+        }
+    }
+
+public:
+    LFUCache(size_t size) : maxSize(size) {}
+
+    bool get(const string& cc, const string& cn, double& population) override {
+        string key = cc + "_" + cn;
+        auto it = cacheMap.find(key);
+        if (it != cacheMap.end()) {
+            population = it->second->population;
+            incrementFrequency(it->second);
+            return true;
+        }
+        return false;
+    }
+
+    void put(const string& cc, const string& cn, double population) override {
+        string key = cc + "_" + cn;
+        auto it = cacheMap.find(key);
+        if (it != cacheMap.end()) {
+            it->second->population = population;
+            incrementFrequency(it->second);
+            return;
+        }
+
+        if (cacheMap.size() >= maxSize) {
+            auto evict = cacheList.begin();
+            cacheMap.erase(evict->key);
+            cacheList.pop_front();
+        }
+
+        Entry entry = {key, population, 1};
+        cacheList.push_back(entry);
+        auto newIt = prev(cacheList.end());
+        cacheMap[key] = newIt;
+    }
+
+    void printCache() const override {
+        cout << "LFU Cache:\n";
+        for (const auto& entry : cacheList) {
+            cout << entry.key << " -> " << entry.population << " (freq: " << entry.frequency << ")\n";
+        }
+    }
+};
+
+double searchPopulationInCSV(const string& filename, const string& cc, const string& cn) {
+    ifstream file(filename);
+    string line;
+    getline(file, line); 
+
+    while (getline(file, line)) {
+        stringstream ss(line);
+        string fileCC, fileCN, populationStr;
+        getline(ss, fileCC, ',');
+        getline(ss, fileCN, ',');
+        getline(ss, populationStr, ',');
+
+        if (fileCC == cc && fileCN == cn) {
+            return stod(populationStr);
+        }
+    }
+    return -1;
+}
+
+struct TrieNode {
+    unordered_map<char, unique_ptr<TrieNode>> children;
+    unordered_map<string, double> cityInfo; 
+    bool isEndOfWord = false;
+};
+
+class Trie {
+    unique_ptr<TrieNode> root = make_unique<TrieNode>();
+
+public:
+    void insert(const string& cityName, const string& countryCode, double population) {
+        TrieNode* node = root.get();
+        for (char c : cityName)
+            node = (node->children[c] = std::move(node->children[c] ? std::move(node->children[c]) : make_unique<TrieNode>())).get();
+        node->isEndOfWord = true;
+        node->cityInfo[countryCode] = population;
+    }
+
+    bool search(const string& cityName, const string& countryCode, double& population) const {
+        const TrieNode* node = root.get();
+        for (char c : cityName) {
+            auto it = node->children.find(c);
+            if (it == node->children.end()) return false;
+            node = it->second.get();
+        }
+        if (node->isEndOfWord) {
+            auto it = node->cityInfo.find(countryCode);
+            if (it != node->cityInfo.end()) {
+                population = it->second;
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+void loadCSVIntoTrie(const string& filename, Trie& trie) {
+    ifstream file(filename);
+    if (!file.is_open()) {
+        cerr << "Failed to open file.\n";
+        return;
+    }
+
+    string line;
+    getline(file, line); // skip header
+
+    while (getline(file, line)) {
+        stringstream ss(line);
+        string countryCode, cityName, popStr;
+        getline(ss, countryCode, ',');
+        getline(ss, cityName, ',');
+        getline(ss, popStr, ',');
+
+        try {
+            double population = stod(popStr);
+            if (!cityName.empty() && !countryCode.empty()) {
+                trie.insert(cityName, countryCode, population);
+            }
+        } catch (...) {
+            cerr << "Skipping bad line: " << line << endl;
+        }
+    }
+
+    cout << "Loaded cities into Trie.\n";
+}
+
+int main() {
+    Trie trie;
+    loadCSVIntoTrie("world_cities.csv", trie);
+
+    ICache* cache = nullptr;
+    cout << "Choose cache strategy (1=LFU, 2=FIFO, 3=Random): ";
+    int choice;
+    cin >> choice;
+    cin.ignore();
+
+    if (choice == 1) cache = new LFUCache(10);
+    else if (choice == 2) cache = new FIFOCache(10);
+    else if (choice == 3) cache = new RandomCache(10);
+    else {
+        cerr << "Invalid choice.\n";
+        return 1;
+    }
+
+    while (true) {
+        string cityName, countryCode;
+        cout << "\nEnter country code (or 'exit'): ";
+        getline(cin, countryCode);
+        if (countryCode == "exit") break;
+
+        cout << "Enter city name: ";
+        getline(cin, cityName);
+
+        double population;
+        if (cache->get(countryCode, cityName, population)) {
+            cout << "Cache hit! Population: " << population << endl;
+        } else if (trie.search(cityName, countryCode, population)) {
+            cout << "Trie lookup. Population: " << population << endl;
+            cache->put(countryCode, cityName, population);
+        } else {
+            cout << "City not found.\n";
+        }
+
+        cache->printCache();
+    }
+
+    delete cache;
+    return 0;
+}
