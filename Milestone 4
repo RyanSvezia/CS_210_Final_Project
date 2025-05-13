@@ -1,0 +1,85 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
+#include <map>
+#include <queue>
+#include <vector>
+#include <chrono>
+#include <random>
+using namespace std;
+using namespace std::chrono;
+
+struct Query {
+    string city, country;
+};
+
+vector<Query> loadQuerySet(const string& filename, int count) {
+    vector<Query> queries;
+    ifstream file(filename);
+    string line;
+    getline(file, line); 
+
+    while (getline(file, line) && queries.size() < count) {
+        stringstream ss(line);
+        string country, city, pop;
+        getline(ss, country, ',');
+        getline(ss, city, ',');
+        getline(ss, pop, ',');
+
+        if (!country.empty() && !city.empty())
+            queries.push_back({city, country});
+    }
+
+    for (int i = 0; i < 100; ++i)
+        queries.push_back(queries[rand() % queries.size()]);
+
+    return queries;
+}
+
+void runTest(ICache* cache, const vector<Query>& queries, Trie& trie,
+             double& avgTimeMs, double& hitRate) {
+    int hits = 0;
+    auto start = high_resolution_clock::now();
+
+    for (const auto& q : queries) {
+        double pop;
+        if (cache->get(q.country, q.city, pop)) {
+            hits++;
+        } else {
+            if (trie.search(q.city, q.country, pop)) {
+                cache->put(q.country, q.city, pop);
+            }
+        }
+    }
+
+    auto end = high_resolution_clock::now();
+    double duration = duration_cast<microseconds>(end - start).count() / 1000.0;
+    avgTimeMs = duration / queries.size();
+    hitRate = static_cast<double>(hits) / queries.size();
+}
+
+int main() {
+    const string dataFile = "world_cities.csv";
+    const int queryCount = 1000;
+    Trie trie;
+    loadCSVIntoTrie(dataFile, trie);
+
+    vector<Query> queries = loadQuerySet(dataFile, queryCount);
+
+    vector<string> strategies = {"LFU", "FIFO", "Random"};
+    for (const string& strategy : strategies) {
+        ICache* cache = nullptr;
+        if (strategy == "LFU") cache = new LFUCache(10);
+        else if (strategy == "FIFO") cache = new FIFOCache(10);
+        else if (strategy == "Random") cache = new RandomCache(10);
+
+        double avgTime = 0.0, hitRate = 0.0;
+        runTest(cache, queries, trie, avgTime, hitRate);
+
+        cout << "Strategy: " << strategy << "\n";
+        cout << "Average Lookup Time: " << avgTime << " ms\n";
+        cout << "Cache Hit Rate: " << hitRate * 100 << "%\n\n";
+
+        delete cache;
+    }
